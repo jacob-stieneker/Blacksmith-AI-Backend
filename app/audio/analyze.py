@@ -33,10 +33,9 @@ def analyze_audio_array(audio: np.ndarray, sample_rate: int | float) -> dict[str
     if audio.ndim == 1:
         audio = audio[:, np.newaxis]
     if audio.ndim != 2:
-        raise AudioAnalysisError("Audio buffer must be 1D mono or 2D multi-channel data.")
-
+        raise AudioAnalysisError("Audio buffer must be mono or multi-channel audio.")
     if audio.size == 0:
-        raise AudioAnalysisError("Audio file is empty.")
+        raise AudioAnalysisError("Audio buffer is empty.")
 
     audio = np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32, copy=False)
     sample_rate = int(sample_rate)
@@ -46,17 +45,17 @@ def analyze_audio_array(audio: np.ndarray, sample_rate: int | float) -> dict[str
     duration_seconds = float(num_samples / sample_rate) if sample_rate > 0 else 0.0
 
     meter = pyln.Meter(sample_rate)
-
     input_lufs = _safe_measure_lufs(meter, audio)
     input_lra = _safe_measure_lra(meter, audio)
-    input_true_peak = _measure_approx_true_peak_dbtp(audio)
+    input_true_peak = _measure_approx_true_peak_chunked(audio, sample_rate)
     input_sample_peak = _measure_sample_peak_dbfs(audio)
     input_rms_dbfs = _measure_rms_dbfs(audio)
     crest_factor_db = _compute_crest_factor_db(input_sample_peak, input_rms_dbfs)
 
     mono = _mono_mix(audio)
-    spectral_centroid_hz = _estimate_spectral_centroid_hz(mono, sample_rate)
-    low_band_ratio, mid_band_ratio, high_band_ratio = _estimate_band_energy_ratios(mono, sample_rate)
+    analysis_signal = _analysis_signal(mono, sample_rate)
+    spectral_centroid_hz = _estimate_spectral_centroid_hz(analysis_signal, sample_rate)
+    low_band_ratio, mid_band_ratio, high_band_ratio = _estimate_band_energy_ratios(analysis_signal, sample_rate)
     stereo_width = _estimate_stereo_width(audio)
 
     return {
@@ -79,23 +78,20 @@ def analyze_audio_array(audio: np.ndarray, sample_rate: int | float) -> dict[str
 
 def _safe_measure_lufs(meter: pyln.Meter, audio: np.ndarray) -> float | None:
     try:
-        value = meter.integrated_loudness(audio)
-        return float(value)
+        return float(meter.integrated_loudness(audio))
     except Exception:
         return None
 
 
 def _safe_measure_lra(meter: pyln.Meter, audio: np.ndarray) -> float | None:
     try:
-        value = meter.loudness_range(audio)
-        return float(value)
+        return float(meter.loudness_range(audio))
     except Exception:
         return None
 
 
 def _measure_sample_peak_dbfs(audio: np.ndarray) -> float:
-    peak = float(np.max(np.abs(audio)))
-    return _linear_to_db(peak)
+    return _linear_to_db(float(np.max(np.abs(audio))))
 
 
 def _measure_rms_dbfs(audio: np.ndarray) -> float:
@@ -103,20 +99,26 @@ def _measure_rms_dbfs(audio: np.ndarray) -> float:
     return _linear_to_db(rms)
 
 
-def _measure_approx_true_peak_dbtp(audio: np.ndarray, oversample_factor: int = 4) -> float:
-    if oversample_factor < 1:
-        oversample_factor = 1
-
+def _measure_approx_true_peak_chunked(
+    audio: np.ndarray,
+    sample_rate: int,
+    oversample_factor: int = 2,
+    max_chunk_seconds: float = 10.0,
+) -> float:
     highest_peak = 0.0
+    chunk_size = max(2048, int(sample_rate * max_chunk_seconds))
 
     for channel_index in range(audio.shape[1]):
         channel = audio[:, channel_index]
-        try:
-            oversampled = resample_poly(channel, oversample_factor, 1)
-        except Exception:
-            oversampled = channel
-        channel_peak = float(np.max(np.abs(oversampled)))
-        highest_peak = max(highest_peak, channel_peak)
+        for start in range(0, channel.shape[0], chunk_size):
+            block = channel[start : start + chunk_size]
+            if block.size == 0:
+                continue
+            try:
+                oversampled = resample_poly(block, oversample_factor, 1)
+            except Exception:
+                oversampled = block
+            highest_peak = max(highest_peak, float(np.max(np.abs(oversampled))))
 
     return _linear_to_db(highest_peak)
 
@@ -133,6 +135,18 @@ def _mono_mix(audio: np.ndarray) -> np.ndarray:
     return np.mean(audio, axis=1, dtype=np.float32)
 
 
+def _analysis_signal(mono_audio: np.ndarray, sample_rate: int) -> np.ndarray:
+    if mono_audio.size == 0:
+        return mono_audio
+
+    excerpt_length = min(mono_audio.size, sample_rate * 60)
+    excerpt = mono_audio[:excerpt_length]
+
+    max_points = 131072
+    step = max(1, int(np.ceil(excerpt.size / max_points)))
+    return excerpt[::step].astype(np.float32, copy=False)
+
+
 def _estimate_spectral_centroid_hz(mono_audio: np.ndarray, sample_rate: int) -> float | None:
     if mono_audio.size == 0:
         return None
@@ -141,13 +155,13 @@ def _estimate_spectral_centroid_hz(mono_audio: np.ndarray, sample_rate: int) -> 
     denom = float(np.sum(spectrum))
     if denom <= 0.0:
         return None
-    centroid = float(np.sum(freqs * spectrum) / denom)
-    return centroid
+    return float(np.sum(freqs * spectrum) / denom)
 
 
 def _estimate_band_energy_ratios(mono_audio: np.ndarray, sample_rate: int) -> tuple[float | None, float | None, float | None]:
     if mono_audio.size == 0:
         return None, None, None
+
     spectrum = np.abs(np.fft.rfft(mono_audio * np.hanning(mono_audio.size))) ** 2
     freqs = np.fft.rfftfreq(mono_audio.size, d=1.0 / sample_rate)
     total = float(np.sum(spectrum))
