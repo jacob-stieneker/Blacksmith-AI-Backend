@@ -13,8 +13,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
-COPY media ./media
-COPY temp ./temp
+RUN mkdir -p /app/media /app/temp
 
 EXPOSE 8000
 
