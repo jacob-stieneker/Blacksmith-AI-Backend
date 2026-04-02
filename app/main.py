@@ -1,23 +1,30 @@
 from __future__ import annotations
 
 import shutil
+import threading
+import time
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.audio.mastering import MasteringEngineError, run_mastering_job
 from app.audio.types import MasteringSettings
-from app.core.config import MEDIA_DIR, TEMP_DIR, get_allowed_origins
+from app.core.config import MEDIA_DIR, get_allowed_origins
 
 app = FastAPI(title="Blacksmith AI Backend")
 
+allowed_origins = get_allowed_origins()
+allow_all_origins = allowed_origins == ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=allowed_origins,
+    allow_credentials=not allow_all_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -25,6 +32,9 @@ app.add_middleware(
 app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".m4a"}
+
+JOBS: dict[str, dict[str, Any]] = {}
+JOB_LOCK = threading.Lock()
 
 
 def ensure_allowed_file(filename: str) -> str:
@@ -34,23 +44,122 @@ def ensure_allowed_file(filename: str) -> str:
     return ext
 
 
+def _set_job(job_id: str, **updates: Any) -> None:
+    with JOB_LOCK:
+        job = JOBS.setdefault(job_id, {})
+        job.update(updates)
+        job["updated_at"] = time.time()
+
+
+def _get_job(job_id: str) -> dict[str, Any]:
+    with JOB_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Mastering job not found.")
+        return dict(job)
+
+
+def _public_job_payload(job_id: str, job: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "job_id": job_id,
+        "status": job.get("status", "queued"),
+        "stage": job.get("stage", "upload"),
+        "progress_percent": job.get("progress_percent", 0),
+        "message": job.get("message", ""),
+        "source_filename": job.get("source_filename"),
+    }
+
+    if job.get("error"):
+        payload["error"] = job["error"]
+
+    if job.get("status") == "ready":
+        payload["preview_url"] = f"/media/{job_id}/{job['preview_filename']}"
+        payload["download_url"] = f"/api/master/jobs/{job_id}/download"
+        payload["stats"] = {
+            "input_lufs": job["input_analysis"].get("input_lufs"),
+            "input_true_peak": job["input_analysis"].get("input_true_peak"),
+            "input_lra": job["input_analysis"].get("input_lra"),
+            "target_lufs": job["settings"].get("target_lufs"),
+        }
+        payload["analysis"] = {
+            "input": job.get("input_analysis", {}),
+            "output": job.get("output_analysis", {}),
+        }
+        payload["recipe"] = job.get("recipe", {})
+        payload["settings_received"] = job.get("settings", {})
+        payload["loudnorm"] = job.get("loudnorm", {})
+
+    return payload
+
+
+def _process_job(job_id: str, uploaded_input_path: Path, job_dir: Path, settings: MasteringSettings) -> None:
+    def progress_callback(stage: str, percent: int, message: str) -> None:
+        _set_job(
+            job_id,
+            status="processing" if stage != "ready" else "ready",
+            stage=stage,
+            progress_percent=percent,
+            message=message,
+        )
+
+    try:
+        result = run_mastering_job(
+            uploaded_input_path=uploaded_input_path,
+            job_dir=job_dir,
+            settings=settings,
+            progress_callback=progress_callback,
+        )
+    except MasteringEngineError as exc:
+        _set_job(
+            job_id,
+            status="error",
+            stage="render",
+            error=str(exc),
+            message=str(exc),
+        )
+        return
+    except Exception as exc:
+        _set_job(
+            job_id,
+            status="error",
+            stage="render",
+            error=f"Mastering failed: {exc}",
+            message=f"Mastering failed: {exc}",
+        )
+        return
+
+    _set_job(
+        job_id,
+        status="ready",
+        stage="ready",
+        progress_percent=100,
+        message="Master complete",
+        preview_filename=result["preview_filename"],
+        download_filename=result["download_filename"],
+        input_analysis=result["input_analysis"],
+        output_analysis=result["output_analysis"],
+        recipe=result["recipe"],
+        settings=result["settings"],
+        loudnorm=result.get("loudnorm", {}),
+    )
+
+
 @app.get("/api/health")
 async def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/api/master")
-async def master_audio(
+@app.post("/api/master/jobs")
+async def create_mastering_job(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     target_lufs: float = Form(-14.0),
-    warmth: int = Form(35),
-    brightness: int = Form(35),
-    punch: int = Form(45),
     low_eq: float = Form(0.0),
     mid_eq: float = Form(0.0),
     high_eq: float = Form(0.0),
-    compression: float = Form(2.0),
-):
+    compression: float = Form(1.5),
+    saturation: int = Form(20),
+) -> dict[str, Any]:
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file was uploaded.")
 
@@ -61,16 +170,15 @@ async def master_audio(
     job_dir.mkdir(parents=True, exist_ok=True)
 
     uploaded_input_path = job_dir / f"original_upload{ext}"
+    source_filename = file.filename
 
     settings = MasteringSettings(
         target_lufs=target_lufs,
-        warmth=warmth,
-        brightness=brightness,
-        punch=punch,
         low_eq=low_eq,
         mid_eq=mid_eq,
         high_eq=high_eq,
         compression=compression,
+        saturation=saturation,
     ).normalized()
 
     try:
@@ -81,26 +189,42 @@ async def master_audio(
     finally:
         file.file.close()
 
-    try:
-        result = run_mastering_job(uploaded_input_path, job_dir, settings)
-    except MasteringEngineError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Mastering failed: {exc}") from exc
+    _set_job(
+        job_id,
+        status="queued",
+        stage="upload",
+        progress_percent=15,
+        message="Upload complete. Waiting for backend analysis",
+        source_filename=source_filename,
+        created_at=time.time(),
+    )
 
-    return {
-        "preview_url": f"/media/{job_id}/{result['preview_filename']}",
-        "download_url": f"/media/{job_id}/{result['download_filename']}",
-        "stats": {
-            "input_lufs": result["input_analysis"].get("input_lufs"),
-            "input_true_peak": result["input_analysis"].get("input_true_peak"),
-            "input_lra": result["input_analysis"].get("input_lra"),
-            "target_lufs": settings.target_lufs,
-        },
-        "analysis": {
-            "input": result["input_analysis"],
-            "output": result["output_analysis"],
-        },
-        "recipe": result["recipe"],
-        "settings_received": result["settings"],
-    }
+    background_tasks.add_task(_process_job, job_id, uploaded_input_path, job_dir, settings)
+    return _public_job_payload(job_id, _get_job(job_id))
+
+
+@app.get("/api/master/jobs/{job_id}")
+async def get_mastering_job(job_id: str) -> dict[str, Any]:
+    return _public_job_payload(job_id, _get_job(job_id))
+
+
+@app.get("/api/master/jobs/{job_id}/download")
+async def download_mastered_file(job_id: str) -> FileResponse:
+    job = _get_job(job_id)
+    if job.get("status") != "ready":
+        raise HTTPException(status_code=409, detail="Mastered file is not ready yet.")
+
+    download_filename = job.get("download_filename")
+    if not download_filename:
+        raise HTTPException(status_code=404, detail="Mastered file not found.")
+
+    file_path = MEDIA_DIR / job_id / download_filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Mastered file not found on disk.")
+
+    source_filename = Path(job.get("source_filename") or "mastered.wav").stem
+    return FileResponse(
+        path=file_path,
+        media_type="audio/wav",
+        filename=f"{source_filename}-mastered.wav",
+    )
