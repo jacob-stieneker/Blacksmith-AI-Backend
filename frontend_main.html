@@ -813,7 +813,7 @@
               <ul class="stage-list" id="stageList">
                 <li class="stage-item" data-stage="upload"><span class="stage-dot"></span><span>Uploading mix</span></li>
                 <li class="stage-item" data-stage="analyze"><span class="stage-dot"></span><span>Analyzing loudness and tonal balance</span></li>
-                <li class="stage-item" data-stage="process"><span class="stage-dot"></span><span>Applying EQ, compression, and tonal shaping</span></li>
+                <li class="stage-item" data-stage="process"><span class="stage-dot"></span><span>Applying EQ, compression, saturation, and loudness control</span></li>
                 <li class="stage-item" data-stage="render"><span class="stage-dot"></span><span>Rendering master and preview files</span></li>
                 <li class="stage-item" data-stage="ready"><span class="stage-dot"></span><span>Preparing playback and download</span></li>
               </ul>
@@ -916,29 +916,11 @@
 
               <div class="slider-row">
                 <div class="slider-head">
-                  <div class="slider-label">Warmth</div>
-                  <div class="slider-value" id="warmthValue">35%</div>
+                  <div class="slider-label">Saturation</div>
+                  <div class="slider-value" id="saturationValue">20%</div>
                 </div>
-                <div class="slider-help">Low-mid color and bass weight.</div>
-                <input type="range" id="warmth" min="0" max="100" step="1" value="35" />
-              </div>
-
-              <div class="slider-row">
-                <div class="slider-head">
-                  <div class="slider-label">Brightness</div>
-                  <div class="slider-value" id="brightnessValue">35%</div>
-                </div>
-                <div class="slider-help">High-end openness and shine.</div>
-                <input type="range" id="brightness" min="0" max="100" step="1" value="35" />
-              </div>
-
-              <div class="slider-row">
-                <div class="slider-head">
-                  <div class="slider-label">Punch</div>
-                  <div class="slider-value" id="punchValue">45%</div>
-                </div>
-                <div class="slider-help">Controls how assertive the dynamics feel.</div>
-                <input type="range" id="punch" min="0" max="100" step="1" value="45" />
+                <div class="slider-help">Subtle harmonic enhancement for brightness, density, and life.</div>
+                <input type="range" id="saturation" min="0" max="100" step="1" value="20" />
               </div>
 
               <div class="slider-row">
@@ -954,11 +936,11 @@
             <div class="action-row">
               <button class="primary-button" type="button" id="remasterButton">Remaster</button>
               <button class="ghost-button" type="button" id="newMasterButton">New Master</button>
-              <a class="ghost-button download-link" id="downloadButton" href="#" download="mastered.wav">Download</a>
+              <button class="ghost-button download-link" id="downloadButton" type="button">Download</button>
             </div>
 
             <div class="footer-note">
-              Download returns the latest high quality WAV created by the server. Remaster always starts from the original uploaded file, not the previous master.
+              Download fetches the latest mastered WAV directly from the server. Remaster always starts from the original uploaded file, not the previous master.
             </div>
           </aside>
         </div>
@@ -966,9 +948,12 @@
     </main>
   </div>
 
+  
   <script>
     const allowedExtensions = ["wav", "mp3", "m4a"];
     const API_BASE = "https://blacksmith-ai-backend.onrender.com";
+    const JOB_POLL_MS = 750;
+
     const state = {
       originalFile: null,
       originalUrl: null,
@@ -976,9 +961,8 @@
       masteredDownloadUrl: null,
       currentSource: "original",
       xhr: null,
-      progressTimer: null,
-      simulatedProgress: 0,
-      activeStage: "upload",
+      pollTimer: null,
+      currentJobId: null,
       isBusy: false,
     };
 
@@ -1016,14 +1000,14 @@
     const statInputLra = document.getElementById("statInputLra");
     const statTargetLufs = document.getElementById("statTargetLufs");
 
+    const stageOrder = ["upload", "analyze", "process", "render", "ready"];
+
     const sliderConfig = [
       { id: "lowEq", output: "lowEqValue", formatter: (v) => `${Number(v).toFixed(1)} dB` },
       { id: "midEq", output: "midEqValue", formatter: (v) => `${Number(v).toFixed(1)} dB` },
       { id: "highEq", output: "highEqValue", formatter: (v) => `${Number(v).toFixed(1)} dB` },
       { id: "compression", output: "compressionValue", formatter: (v) => `${Number(v).toFixed(1)}:1` },
-      { id: "warmth", output: "warmthValue", formatter: (v) => `${v}%` },
-      { id: "brightness", output: "brightnessValue", formatter: (v) => `${v}%` },
-      { id: "punch", output: "punchValue", formatter: (v) => `${v}%` },
+      { id: "saturation", output: "saturationValue", formatter: (v) => `${v}%` },
       { id: "targetLufs", output: "targetLufsValue", formatter: (v) => `${Number(v).toFixed(1)} LUFS` },
     ];
 
@@ -1064,68 +1048,50 @@
       errorBanner.style.display = "none";
     }
 
+    function setBusy(isBusy) {
+      state.isBusy = isBusy;
+      remasterButton.disabled = isBusy;
+      newMasterButton.disabled = isBusy;
+      uploadButton.disabled = isBusy;
+      fileInput.disabled = isBusy;
+      playMasteredButton.disabled = isBusy || !state.masteredPreviewUrl;
+      downloadButton.disabled = isBusy || !state.masteredDownloadUrl;
+    }
+
     function updateProgress(percent, stageKey, stageLabel) {
       const clamped = Math.max(0, Math.min(100, Math.round(percent)));
       progressPercent.textContent = String(clamped);
       progressFill.style.width = `${clamped}%`;
-      const progressBar = document.querySelector('.progress-bar');
-      if (progressBar) progressBar.setAttribute('aria-valuenow', String(clamped));
+
+      const progressBar = document.querySelector(".progress-bar");
+      if (progressBar) progressBar.setAttribute("aria-valuenow", String(clamped));
       if (stageLabel) progressStageText.textContent = stageLabel;
-      if (stageKey) {
-        state.activeStage = stageKey;
-        const order = ["upload", "analyze", "process", "render", "ready"];
-        const activeIndex = order.indexOf(stageKey);
-        stageItems.forEach((item) => {
-          const idx = order.indexOf(item.dataset.stage);
-          item.classList.toggle("done", idx >= 0 && idx < activeIndex);
-          item.classList.toggle("active", item.dataset.stage === stageKey);
-        });
-      }
+
+      if (!stageKey) return;
+
+      const normalizedStage = stageOrder.includes(stageKey) ? stageKey : "upload";
+      const activeIndex = stageOrder.indexOf(normalizedStage);
+
+      stageItems.forEach((item) => {
+        const idx = stageOrder.indexOf(item.dataset.stage);
+        item.classList.toggle("done", idx >= 0 && idx < activeIndex);
+        item.classList.toggle("active", item.dataset.stage === normalizedStage);
+      });
     }
 
-    function startProcessingSimulation(startAt = 28) {
-      stopProcessingSimulation();
-      state.simulatedProgress = Math.max(startAt, state.simulatedProgress, 28);
-      const steps = [
-        { max: 46, stage: "analyze", label: "Upload complete. Scanning loudness and tonal balance" },
-        { max: 78, stage: "process", label: "Applying EQ, compression, and tonal shaping" },
-        { max: 94, stage: "render", label: "Rendering master and preview" },
-        { max: 98, stage: "ready", label: "Finalizing playback and download" },
-      ];
-
-      state.progressTimer = window.setInterval(() => {
-        let current = steps[steps.length - 1];
-        for (const step of steps) {
-          if (state.simulatedProgress < step.max) {
-            current = step;
-            break;
-          }
-        }
-        if (state.simulatedProgress < current.max) {
-          const bump = current.stage === "analyze"
-            ? (Math.random() * 1.8 + 1.25)
-            : current.stage === "process"
-              ? (Math.random() * 1.45 + 0.9)
-              : (Math.random() * 0.7 + 0.28);
-          state.simulatedProgress += bump;
-          if (state.simulatedProgress > current.max) state.simulatedProgress = current.max;
-        }
-        updateProgress(state.simulatedProgress, current.stage, current.label);
-      }, 165);
-    }
-
-    function stopProcessingSimulation() {
-      if (state.progressTimer) {
-        window.clearInterval(state.progressTimer);
-        state.progressTimer = null;
+    function stopPollingJob() {
+      if (state.pollTimer) {
+        window.clearInterval(state.pollTimer);
+        state.pollTimer = null;
       }
     }
 
     function resetResults() {
       state.masteredPreviewUrl = null;
       state.masteredDownloadUrl = null;
+      state.currentJobId = null;
       playMasteredButton.disabled = true;
-      downloadButton.removeAttribute("href");
+      downloadButton.disabled = true;
       downloadButton.style.pointerEvents = "none";
       downloadButton.style.opacity = "0.55";
     }
@@ -1135,14 +1101,21 @@
         window.alert("Please choose a WAV, MP3, or M4A file.");
         return;
       }
+
       if (state.originalUrl) URL.revokeObjectURL(state.originalUrl);
+
       state.originalFile = file;
       state.originalUrl = URL.createObjectURL(file);
+
+      stopPollingJob();
       resetResults();
+      clearError();
+
       processingFileName.textContent = file.name;
       processingFileSize.textContent = formatFileSize(file.size);
       resultFileName.textContent = file.name;
-      resultSourceLabel.textContent = "Original and mastered preview ready";
+      resultSourceLabel.textContent = "Original loaded. Click Mastered to compare.";
+
       playOriginal();
       setPage(2);
       startMastering();
@@ -1151,101 +1124,152 @@
     function getMasteringSettings() {
       return {
         target_lufs: document.getElementById("targetLufs").value,
-        warmth: document.getElementById("warmth").value,
-        brightness: document.getElementById("brightness").value,
-        punch: document.getElementById("punch").value,
         low_eq: document.getElementById("lowEq").value,
         mid_eq: document.getElementById("midEq").value,
         high_eq: document.getElementById("highEq").value,
         compression: document.getElementById("compression").value,
+        saturation: document.getElementById("saturation").value,
       };
     }
 
     function startMastering() {
       if (!state.originalFile || state.isBusy) return;
+
+      stopPollingJob();
       clearError();
-      state.isBusy = true;
-      remasterButton.disabled = true;
-      newMasterButton.disabled = true;
-      uploadButton.disabled = true;
-      playMasteredButton.disabled = true;
+      resetResults();
+      setBusy(true);
       setPage(2);
       updateProgress(0, "upload", "Uploading mix to server");
-      startProcessingSimulation();
 
       const formData = new FormData();
       formData.append("file", state.originalFile, state.originalFile.name);
+
       const settings = getMasteringSettings();
-      Object.entries(settings).forEach(([key, value]) => formData.append(key, String(value)));
+      Object.entries(settings).forEach(([key, value]) => {
+        formData.append(key, String(value));
+      });
 
       const xhr = new XMLHttpRequest();
       state.xhr = xhr;
-      xhr.open("POST", `${API_BASE}/api/master`, true);
+      xhr.open("POST", `${API_BASE}/api/master/jobs`, true);
       xhr.responseType = "json";
+      xhr.timeout = 300000;
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) {
-          const uploadPercent = Math.max(8, Math.round((event.loaded / event.total) * 30));
-          state.simulatedProgress = Math.max(state.simulatedProgress, uploadPercent);
-          updateProgress(state.simulatedProgress, "upload", "Uploading mix to server");
-          if (event.loaded >= event.total) {
-            state.simulatedProgress = Math.max(state.simulatedProgress, 28);
-            updateProgress(state.simulatedProgress, "analyze", "Upload complete. Scanning loudness and tonal balance");
-          }
+          const uploadPercent = Math.max(1, Math.round((event.loaded / event.total) * 15));
+          updateProgress(uploadPercent, "upload", "Uploading mix to server");
         }
       };
 
       xhr.upload.onload = () => {
-        state.simulatedProgress = Math.max(state.simulatedProgress, 28);
-        updateProgress(state.simulatedProgress, "analyze", "Upload complete. Scanning loudness and tonal balance");
+        updateProgress(15, "upload", "Upload complete. Waiting for backend job start");
       };
 
       xhr.onerror = () => {
-        stopProcessingSimulation();
+        setBusy(false);
         updateProgress(0, "upload", "Upload failed");
         showError(`Mastering failed. The request could not reach the server at ${API_BASE}. Check that the backend is deployed, running, and allowed by CORS.`);
-        state.isBusy = false;
-        remasterButton.disabled = false;
-        newMasterButton.disabled = false;
-        uploadButton.disabled = false;
+      };
+
+      xhr.ontimeout = () => {
+        setBusy(false);
+        updateProgress(0, "upload", "Request timed out");
+        showError("Mastering timed out while waiting for the backend to accept the upload.");
+      };
+
+      xhr.onabort = () => {
+        setBusy(false);
+        updateProgress(0, "upload", "Request aborted");
       };
 
       xhr.onload = () => {
-        stopProcessingSimulation();
-        state.isBusy = false;
-        remasterButton.disabled = false;
-        newMasterButton.disabled = false;
-        uploadButton.disabled = false;
-
         const ok = xhr.status >= 200 && xhr.status < 300;
         const payload = xhr.response || {};
 
         if (!ok) {
+          setBusy(false);
           const detail = payload?.detail || xhr.responseText || "Unknown server error.";
           updateProgress(0, "upload", "Mastering failed");
           showError(typeof detail === "string" ? detail : "Mastering failed.");
           return;
         }
 
-        updateProgress(100, "ready", "Master complete");
+        state.currentJobId = payload.job_id || null;
+        updateProgress(payload.progress_percent || 20, payload.stage || "analyze", payload.message || "Backend analysis started");
+
+        if (!state.currentJobId) {
+          setBusy(false);
+          showError("Mastering failed. No job ID was returned by the backend.");
+          return;
+        }
+
+        startPollingJob(state.currentJobId);
+      };
+
+      xhr.send(formData);
+    }
+
+    async function pollJob(jobId) {
+      try {
+        const response = await fetch(`${API_BASE}/api/master/jobs/${jobId}`, { mode: "cors", cache: "no-store" });
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(payload?.detail || "Could not retrieve mastering job status.");
+        }
+
+        updateProgress(payload.progress_percent ?? 0, payload.stage || "upload", payload.message || "Processing");
+        if (payload.source_filename) {
+          processingFileName.textContent = payload.source_filename;
+          resultFileName.textContent = payload.source_filename;
+        }
+
+        if (payload.status === "error") {
+          stopPollingJob();
+          setBusy(false);
+          showError(payload.error || payload.message || "Mastering failed.");
+          return;
+        }
+
+        if (payload.status !== "ready") {
+          return;
+        }
+
+        stopPollingJob();
         state.masteredPreviewUrl = payload.preview_url ? new URL(payload.preview_url, API_BASE).toString() : null;
         state.masteredDownloadUrl = payload.download_url ? new URL(payload.download_url, API_BASE).toString() : null;
-        downloadButton.href = state.masteredDownloadUrl || "#";
-        downloadButton.style.pointerEvents = "auto";
-        downloadButton.style.opacity = "1";
-        playMasteredButton.disabled = false;
 
         const stats = payload.stats || {};
         statInputLufs.textContent = typeof stats.input_lufs === "number" ? `${stats.input_lufs.toFixed(1)} LUFS` : "--";
         statInputPeak.textContent = typeof stats.input_true_peak === "number" ? `${stats.input_true_peak.toFixed(1)} dBTP` : "--";
         statInputLra.textContent = typeof stats.input_lra === "number" ? `${stats.input_lra.toFixed(1)} LU` : "--";
-        statTargetLufs.textContent = typeof stats.target_lufs === "number" ? `${stats.target_lufs.toFixed(1)} LUFS` : `${Number(document.getElementById("targetLufs").value).toFixed(1)} LUFS`;
+        statTargetLufs.textContent = typeof stats.target_lufs === "number"
+          ? `${stats.target_lufs.toFixed(1)} LUFS`
+          : `${Number(document.getElementById("targetLufs").value).toFixed(1)} LUFS`;
 
+        resultSourceLabel.textContent = "Original loaded. Click Mastered to compare.";
+        downloadButton.disabled = !state.masteredDownloadUrl;
+        downloadButton.style.pointerEvents = state.masteredDownloadUrl ? "auto" : "none";
+        downloadButton.style.opacity = state.masteredDownloadUrl ? "1" : "0.55";
+        playMasteredButton.disabled = !state.masteredPreviewUrl;
+        setBusy(false);
         setPage(3);
-        playMastered();
-      };
+        playOriginal();
+      } catch (error) {
+        stopPollingJob();
+        setBusy(false);
+        showError(error instanceof Error ? error.message : "Could not retrieve mastering job status.");
+      }
+    }
 
-      xhr.send(formData);
+    function startPollingJob(jobId) {
+      stopPollingJob();
+      pollJob(jobId);
+      state.pollTimer = window.setInterval(() => {
+        pollJob(jobId);
+      }, JOB_POLL_MS);
     }
 
     function playOriginal() {
@@ -1268,27 +1292,72 @@
       audioPlayer.load();
     }
 
+    async function downloadMasteredFile() {
+      if (!state.masteredDownloadUrl || state.isBusy) return;
+
+      downloadButton.disabled = true;
+
+      try {
+        const response = await fetch(state.masteredDownloadUrl, { mode: "cors" });
+        if (!response.ok) {
+          throw new Error("Could not download mastered file.");
+        }
+
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        const baseName = (state.originalFile?.name || "mastered").replace(/\.[^/.]+$/, "");
+
+        anchor.href = blobUrl;
+        anchor.download = `${baseName}-mastered.wav`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+
+        window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+      } catch (error) {
+        showError(error instanceof Error ? error.message : "Could not download mastered file.");
+      } finally {
+        downloadButton.disabled = false;
+      }
+    }
+
     function resetToUpload() {
-      stopProcessingSimulation();
-      if (state.xhr && state.isBusy) state.xhr.abort();
-      state.isBusy = false;
+      stopPollingJob();
+
+      if (state.xhr && state.isBusy) {
+        state.xhr.abort();
+      }
+
+      setBusy(false);
       clearError();
       updateProgress(0, "upload", "Waiting to begin");
       resetResults();
+
       if (state.originalUrl) {
         URL.revokeObjectURL(state.originalUrl);
       }
+
       state.originalUrl = null;
       state.originalFile = null;
+      state.xhr = null;
       fileInput.value = "";
+
       playOriginalButton.classList.add("active");
       playMasteredButton.classList.remove("active");
       audioPlayer.removeAttribute("src");
       audioPlayer.load();
+
       statInputLufs.textContent = "--";
       statInputPeak.textContent = "--";
       statInputLra.textContent = "--";
       statTargetLufs.textContent = "--";
+
+      processingFileName.textContent = "No file selected";
+      processingFileSize.textContent = "0 MB";
+      resultFileName.textContent = "No file selected";
+      resultSourceLabel.textContent = "Preview ready";
+
       setPage(1);
     }
 
@@ -1305,10 +1374,12 @@
     sliderConfig.forEach(bindSliderValue);
 
     uploadButton.addEventListener("click", () => fileInput.click());
+
     dropzone.addEventListener("click", (event) => {
       if (event.target === uploadButton) return;
       fileInput.click();
     });
+
     dropzone.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
@@ -1347,9 +1418,15 @@
       startMastering();
     });
     newMasterButton.addEventListener("click", resetToUpload);
+    downloadButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      downloadMasteredFile();
+    });
 
     resetResults();
+    setBusy(false);
     updateProgress(0, "upload", "Waiting to begin");
   </script>
+
 </body>
 </html>
