@@ -1,30 +1,22 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from __future__ import annotations
+
+import shutil
 from pathlib import Path
 from uuid import uuid4
-import shutil
 
-APP_ROOT = Path(__file__).resolve().parent.parent
-MEDIA_DIR = APP_ROOT / "media"
-TEMP_DIR = APP_ROOT / "temp"
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-TEMP_DIR.mkdir(parents=True, exist_ok=True)
+from app.audio.mastering import MasteringEngineError, run_mastering_job
+from app.audio.types import MasteringSettings
+from app.core.config import MEDIA_DIR, TEMP_DIR, get_allowed_origins
 
 app = FastAPI(title="Blacksmith AI Backend")
 
-# Update these later to your real Wix and custom domain URLs.
-ALLOWED_ORIGINS = [
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-    "https://your-site.wixsite.com",
-    "https://www.yourdomain.com",
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,7 +35,7 @@ def ensure_allowed_file(filename: str) -> str:
 
 
 @app.get("/api/health")
-async def health_check():
+async def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
@@ -68,35 +60,47 @@ async def master_audio(
     job_dir = MEDIA_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    original_path = job_dir / f"original{ext}"
-    preview_path = job_dir / f"preview{ext}"
-    download_path = job_dir / f"mastered{ext}"
+    uploaded_input_path = job_dir / f"original_upload{ext}"
 
-    with original_path.open("wb") as out_file:
-        shutil.copyfileobj(file.file, out_file)
+    settings = MasteringSettings(
+        target_lufs=target_lufs,
+        warmth=warmth,
+        brightness=brightness,
+        punch=punch,
+        low_eq=low_eq,
+        mid_eq=mid_eq,
+        high_eq=high_eq,
+        compression=compression,
+    ).normalized()
 
-    # Placeholder behavior for now:
-    # copy the uploaded file as both preview and mastered output
-    shutil.copy2(original_path, preview_path)
-    shutil.copy2(original_path, download_path)
+    try:
+        with uploaded_input_path.open("wb") as out_file:
+            shutil.copyfileobj(file.file, out_file)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {exc}") from exc
+    finally:
+        file.file.close()
+
+    try:
+        result = run_mastering_job(uploaded_input_path, job_dir, settings)
+    except MasteringEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Mastering failed: {exc}") from exc
 
     return {
-        "preview_url": f"/media/{job_id}/{preview_path.name}",
-        "download_url": f"/media/{job_id}/{download_path.name}",
+        "preview_url": f"/media/{job_id}/{result['preview_filename']}",
+        "download_url": f"/media/{job_id}/{result['download_filename']}",
         "stats": {
-            "input_lufs": None,
-            "input_true_peak": None,
-            "input_lra": None,
-            "target_lufs": target_lufs,
+            "input_lufs": result["input_analysis"].get("input_lufs"),
+            "input_true_peak": result["input_analysis"].get("input_true_peak"),
+            "input_lra": result["input_analysis"].get("input_lra"),
+            "target_lufs": settings.target_lufs,
         },
-        "settings_received": {
-            "target_lufs": target_lufs,
-            "warmth": warmth,
-            "brightness": brightness,
-            "punch": punch,
-            "low_eq": low_eq,
-            "mid_eq": mid_eq,
-            "high_eq": high_eq,
-            "compression": compression,
+        "analysis": {
+            "input": result["input_analysis"],
+            "output": result["output_analysis"],
         },
+        "recipe": result["recipe"],
+        "settings_received": result["settings"],
     }
