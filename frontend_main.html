@@ -641,6 +641,14 @@
     render();
   }
 
+
+  window.addEventListener("message", (event) => {
+    const data = event.data || {};
+    if (data.type === "bsai-download-error") {
+      showError(data.message || "Could not download mastered file.");
+    }
+  });
+
   sliderConfig.forEach(bindSliderValue);
   uploadButton.addEventListener("click", () => fileInput.click());
   dropzone.addEventListener("click", (event) => { if (event.target === uploadButton) return; fileInput.click(); });
