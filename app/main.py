@@ -32,7 +32,6 @@ app.add_middleware(
 app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".m4a"}
-
 JOBS: dict[str, dict[str, Any]] = {}
 JOB_LOCK = threading.Lock()
 
@@ -73,13 +72,16 @@ def _public_job_payload(job_id: str, job: dict[str, Any]) -> dict[str, Any]:
         payload["error"] = job["error"]
 
     if job.get("status") == "ready":
+        target_lufs = None
+        if job.get("recipe"):
+            target_lufs = job["recipe"].get("target_lufs")
         payload["preview_url"] = f"/media/{job_id}/{job['preview_filename']}"
         payload["download_url"] = f"/api/master/jobs/{job_id}/download"
         payload["stats"] = {
             "input_lufs": job["input_analysis"].get("input_lufs"),
             "input_true_peak": job["input_analysis"].get("input_true_peak"),
             "input_lra": job["input_analysis"].get("input_lra"),
-            "target_lufs": job["settings"].get("target_lufs"),
+            "target_lufs": target_lufs,
         }
         payload["analysis"] = {
             "input": job.get("input_analysis", {}),
@@ -88,7 +90,6 @@ def _public_job_payload(job_id: str, job: dict[str, Any]) -> dict[str, Any]:
         payload["recipe"] = job.get("recipe", {})
         payload["settings_received"] = job.get("settings", {})
         payload["loudnorm"] = job.get("loudnorm", {})
-
     return payload
 
 
@@ -110,22 +111,10 @@ def _process_job(job_id: str, uploaded_input_path: Path, job_dir: Path, settings
             progress_callback=progress_callback,
         )
     except MasteringEngineError as exc:
-        _set_job(
-            job_id,
-            status="error",
-            stage="render",
-            error=str(exc),
-            message=str(exc),
-        )
+        _set_job(job_id, status="error", stage="render", error=str(exc), message=str(exc))
         return
     except Exception as exc:
-        _set_job(
-            job_id,
-            status="error",
-            stage="render",
-            error=f"Mastering failed: {exc}",
-            message=f"Mastering failed: {exc}",
-        )
+        _set_job(job_id, status="error", stage="render", error=f"Mastering failed: {exc}", message=f"Mastering failed: {exc}")
         return
 
     _set_job(
@@ -153,18 +142,17 @@ async def health_check() -> dict[str, str]:
 async def create_mastering_job(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    target_lufs: float = Form(-14.0),
     low_eq: float = Form(0.0),
     mid_eq: float = Form(0.0),
     high_eq: float = Form(0.0),
-    compression: float = Form(1.5),
-    saturation: int = Form(20),
+    compression_mode: str = Form("normal"),
+    loudness_mode: str = Form("normal"),
+    stereo_width_mode: str = Form("normal"),
 ) -> dict[str, Any]:
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file was uploaded.")
 
     ext = ensure_allowed_file(file.filename)
-
     job_id = str(uuid4())
     job_dir = MEDIA_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -173,12 +161,12 @@ async def create_mastering_job(
     source_filename = file.filename
 
     settings = MasteringSettings(
-        target_lufs=target_lufs,
         low_eq=low_eq,
         mid_eq=mid_eq,
         high_eq=high_eq,
-        compression=compression,
-        saturation=saturation,
+        compression_mode=compression_mode,
+        loudness_mode=loudness_mode,
+        stereo_width_mode=stereo_width_mode,
     ).normalized()
 
     try:
