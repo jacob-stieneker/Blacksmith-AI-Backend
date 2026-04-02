@@ -37,10 +37,10 @@ def run_mastering_job(
     try:
         decode_to_wav(uploaded_input_path, decoded_input_path)
 
-        _emit(progress_callback, "analyze", 40, "Analyzing loudness and tonal balance")
+        _emit(progress_callback, "analyze", 40, "Analyzing loudness, tone, and stereo image")
         input_analysis = analyze_audio_file(decoded_input_path)
 
-        _emit(progress_callback, "process", 55, "Building mastering recipe")
+        _emit(progress_callback, "process", 58, "Building mastering recipe")
         processing_result = process_audio_file(
             decoded_input_path,
             mastered_wav_path,
@@ -49,7 +49,6 @@ def run_mastering_job(
         )
 
         _emit(progress_callback, "process", 82, "Final loudness verification complete")
-
         _emit(progress_callback, "render", 90, "Rendering mastered preview")
         render_preview_mp3(mastered_wav_path, preview_mp3_path)
     except Exception as exc:
@@ -57,7 +56,6 @@ def run_mastering_job(
     finally:
         if CLEAN_INTERMEDIATE_FILES and decoded_input_path.exists():
             decoded_input_path.unlink(missing_ok=True)
-
         pre_loudnorm_path = job_dir / "pre_loudnorm.wav"
         if CLEAN_INTERMEDIATE_FILES and pre_loudnorm_path.exists():
             pre_loudnorm_path.unlink(missing_ok=True)
