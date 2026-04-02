@@ -19,8 +19,5 @@ CLEAN_INTERMEDIATE_FILES = os.getenv("BSAI_CLEAN_INTERMEDIATE_FILES", "true").lo
 
 
 def get_allowed_origins() -> List[str]:
-    raw = os.getenv(
-        "BSAI_ALLOWED_ORIGINS",
-        "http://localhost:8000,http://127.0.0.1:8000,https://your-site.wixsite.com,https://www.yourdomain.com",
-    )
+    raw = os.getenv("BSAI_ALLOWED_ORIGINS", "*")
     return [item.strip() for item in raw.split(",") if item.strip()]
