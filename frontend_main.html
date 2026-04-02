@@ -1,0 +1,1352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blacksmith AI</title>
+  <style>
+    :root {
+      --bg: #050505;
+      --bg-soft: #0a0a0a;
+      --panel: rgba(14, 14, 14, 0.86);
+      --panel-strong: rgba(8, 8, 8, 0.96);
+      --line: rgba(212,175,55,0.16);
+      --line-strong: rgba(212,175,55,0.28);
+      --text: #f8f1dd;
+      --muted: #cab88a;
+      --muted-2: #9c8954;
+      --accent: #d4af37;
+      --accent-2: #f3d37a;
+      --success: #d4af37;
+      --warning: #ffb54d;
+      --shadow: 0 20px 60px rgba(0,0,0,0.38);
+      --radius-xl: 28px;
+      --radius-lg: 20px;
+      --radius-md: 14px;
+      --radius-sm: 10px;
+      --max: 1220px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 18% 18%, rgba(212, 175, 55, 0.18), transparent 34%),
+        radial-gradient(circle at 82% 12%, rgba(212, 175, 55, 0.10), transparent 28%),
+        linear-gradient(180deg, #0a0906 0%, #040404 100%);
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(rgba(212,175,55,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(212,175,55,0.04) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0));
+      opacity: 0.28;
+    }
+
+    .shell {
+      position: relative;
+      min-height: 100vh;
+      padding: 28px 22px 42px;
+    }
+
+    .header, .page {
+      width: min(100%, var(--max));
+      margin: 0 auto;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding-bottom: 20px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      color: var(--text);
+      min-width: 0;
+    }
+
+    .brand-logo-wrap {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 14px;
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(212,175,55,0.05));
+      border: 1px solid var(--line);
+      box-shadow: 0 10px 28px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.03);
+    }
+
+    .brand-logo {
+      display: block;
+      height: 34px;
+      width: auto;
+      max-width: min(58vw, 240px);
+      object-fit: contain;
+      filter: drop-shadow(0 6px 18px rgba(212,175,55,0.15));
+    }
+
+    .brand-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .brand-title {
+      font-size: 12px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--text);
+      white-space: nowrap;
+    }
+
+    .brand-subtitle {
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted-2);
+      white-space: nowrap;
+    }
+
+    .stepper {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .step {
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(212,175,55,0.04);
+      color: var(--muted);
+      font-size: 13px;
+      letter-spacing: 0.02em;
+    }
+
+    .step.active {
+      color: var(--text);
+      border-color: rgba(255,255,255,0.18);
+      background: linear-gradient(135deg, rgba(212,175,55,0.22), rgba(112,88,18,0.18));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+    }
+
+    .page {
+      display: none;
+      animation: rise 260ms ease;
+    }
+
+    .page.active { display: block; }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .hero-card, .panel, .player-card, .controls-card {
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(16, 13, 8, 0.9), rgba(8, 8, 6, 0.96));
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+    }
+
+    .hero-card {
+      border-radius: 36px;
+      min-height: calc(100vh - 120px);
+      display: grid;
+      place-items: center;
+      padding: 36px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hero-card::before,
+    .hero-card::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(4px);
+      opacity: 0.8;
+    }
+
+    .hero-card::before {
+      width: 360px;
+      height: 360px;
+      background: radial-gradient(circle, rgba(212,175,55,0.22), transparent 66%);
+      left: -80px;
+      top: -90px;
+    }
+
+    .hero-card::after {
+      width: 420px;
+      height: 420px;
+      background: radial-gradient(circle, rgba(243,211,122,0.14), transparent 68%);
+      right: -80px;
+      bottom: -120px;
+    }
+
+    .hero-inner {
+      position: relative;
+      z-index: 2;
+      width: min(100%, 860px);
+      text-align: center;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 14px;
+      border-radius: 999px;
+      background: rgba(212,175,55,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+
+    .eyebrow-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(46px, 8vw, 110px);
+      line-height: 0.93;
+      letter-spacing: -0.05em;
+      font-weight: 800;
+      text-wrap: balance;
+    }
+
+    h1 .accent {
+      background: linear-gradient(135deg, #fff7da 0%, #f3d37a 40%, #d4af37 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .hero-copy {
+      margin: 20px auto 0;
+      width: min(100%, 640px);
+      color: var(--muted);
+      font-size: clamp(16px, 2vw, 20px);
+      line-height: 1.55;
+    }
+
+    .dropzone {
+      margin: 34px auto 0;
+      width: min(100%, 620px);
+      padding: 28px;
+      border-radius: 28px;
+      border: 1px dashed rgba(255,255,255,0.2);
+      background: rgba(212,175,55,0.04);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+      transition: border-color .2s ease, transform .2s ease, background .2s ease;
+      cursor: pointer;
+    }
+
+    .dropzone.dragover {
+      border-color: rgba(255,255,255,0.45);
+      background: rgba(212,175,55,0.06);
+      transform: translateY(-2px);
+    }
+
+    .upload-button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: var(--text);
+      padding: 16px 28px;
+      font-weight: 700;
+      font-size: 16px;
+      cursor: pointer;
+      box-shadow: 0 12px 32px rgba(212,175,55,0.24);
+      transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease;
+    }
+
+    .upload-button:hover,
+    .ghost-button:hover,
+    .primary-button:hover {
+      transform: translateY(-1px);
+    }
+
+    .upload-button:active,
+    .ghost-button:active,
+    .primary-button:active {
+      transform: translateY(0);
+    }
+
+    .drop-help {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .support-text {
+      margin-top: 10px;
+      color: var(--muted-2);
+      font-size: 13px;
+    }
+
+    .processing-wrap {
+      min-height: calc(100vh - 160px);
+      display: grid;
+      place-items: center;
+    }
+
+    .panel {
+      width: min(100%, 760px);
+      border-radius: 34px;
+      padding: 34px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .panel::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at top right, rgba(212,175,55,0.15), transparent 32%);
+      pointer-events: none;
+    }
+
+    .processing-kicker {
+      color: var(--muted);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      margin-bottom: 14px;
+    }
+
+    .processing-title {
+      font-size: clamp(32px, 5vw, 56px);
+      line-height: 1.02;
+      letter-spacing: -0.04em;
+      font-weight: 800;
+      margin: 0;
+    }
+
+    .processing-copy {
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.6;
+      margin: 16px 0 26px;
+    }
+
+    .track-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .meta-chip {
+      border-radius: 999px;
+      padding: 10px 14px;
+      background: rgba(212,175,55,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .progress-cluster {
+      padding: 18px;
+      border-radius: 22px;
+      background: rgba(212,175,55,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .progress-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 12px;
+    }
+
+    .progress-stage {
+      font-size: 15px;
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .progress-value {
+      font-size: clamp(24px, 4vw, 42px);
+      line-height: 1;
+      letter-spacing: -0.05em;
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 14px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.07);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-fill {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      transition: width .2s ease;
+      position: relative;
+    }
+
+    .progress-fill::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.28), transparent);
+      animation: shimmer 1.2s linear infinite;
+    }
+
+    @keyframes shimmer {
+      from { transform: translateX(-100%); }
+      to { transform: translateX(120%); }
+    }
+
+    .stage-list {
+      margin: 16px 0 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 10px;
+    }
+
+    .stage-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .stage-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: transparent;
+      flex: 0 0 auto;
+    }
+
+    .stage-item.done .stage-dot,
+    .stage-item.active .stage-dot {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      border-color: transparent;
+      box-shadow: 0 0 0 5px rgba(255,255,255,0.03);
+    }
+
+    .stage-item.active { color: var(--text); }
+    .stage-item.done { color: #e8d8a5; }
+
+    .error-banner {
+      display: none;
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: rgba(212, 175, 55, 0.12);
+      border: 1px solid rgba(212, 175, 55, 0.28);
+      color: #f7e7b4;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .results-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 22px;
+      min-height: calc(100vh - 160px);
+    }
+
+    .player-card, .controls-card {
+      border-radius: 30px;
+      padding: 28px;
+    }
+
+    .player-eyebrow, .controls-eyebrow {
+      color: var(--muted);
+      font-size: 13px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+
+    .results-title {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 54px);
+      line-height: 1.03;
+      letter-spacing: -0.05em;
+      font-weight: 800;
+    }
+
+    .results-copy {
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.6;
+      margin: 14px 0 24px;
+    }
+
+    .toggle-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+
+    .toggle-button, .ghost-button, .primary-button {
+      appearance: none;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      color: var(--text);
+      background: rgba(212,175,55,0.04);
+      padding: 12px 18px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform .18s ease, background .18s ease, border-color .18s ease, opacity .18s ease;
+    }
+
+    .toggle-button.active,
+    .primary-button {
+      border-color: transparent;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      box-shadow: 0 12px 24px rgba(212,175,55,0.2);
+    }
+
+    .primary-button[disabled],
+    .ghost-button[disabled],
+    .toggle-button[disabled],
+    .upload-button[disabled] {
+      opacity: 0.55;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .audio-wrap {
+      margin-top: 20px;
+      padding: 18px;
+      border-radius: 22px;
+      background: rgba(212,175,55,0.04);
+      border: 1px solid rgba(255,255,255,0.07);
+    }
+
+    audio {
+      width: 100%;
+      margin-top: 8px;
+      filter: saturate(0.92) brightness(1.02);
+    }
+
+    .now-playing {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 14px;
+      margin-bottom: 6px;
+      flex-wrap: wrap;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .stat-card {
+      padding: 16px;
+      border-radius: 18px;
+      background: rgba(212,175,55,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .stat-label {
+      color: var(--muted-2);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 8px;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      color: var(--text);
+    }
+
+    .controls-card {
+      display: flex;
+      flex-direction: column;
+      min-height: 100%;
+    }
+
+    .section-copy {
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.55;
+      margin: 0 0 16px;
+    }
+
+    .sliders {
+      display: grid;
+      gap: 16px;
+      margin-top: 6px;
+    }
+
+    .slider-row {
+      padding: 16px;
+      border-radius: 18px;
+      background: rgba(212,175,55,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .slider-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 10px;
+    }
+
+    .slider-label {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .slider-value {
+      font-size: 14px;
+      font-weight: 700;
+      color: #e8d8a5;
+      white-space: nowrap;
+    }
+
+    .slider-help {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+      margin-bottom: 12px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      appearance: none;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-runnable-track {
+      height: 8px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(255,255,255,0.09), rgba(255,255,255,0.12));
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 20px;
+      height: 20px;
+      margin-top: -6px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #fff7da, #d4af37);
+      border: 0;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.35);
+    }
+
+    input[type="range"]::-moz-range-track {
+      height: 8px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(255,255,255,0.09), rgba(255,255,255,0.12));
+    }
+
+    input[type="range"]::-moz-range-thumb {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #fff7da, #d4af37);
+      border: 0;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.35);
+    }
+
+    .action-row {
+      margin-top: auto;
+      padding-top: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .download-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+    }
+
+    .footer-note {
+      margin-top: 18px;
+      color: var(--muted-2);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .hidden-input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+      width: 1px;
+      height: 1px;
+    }
+
+    @media (max-width: 980px) {
+      .results-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .shell { padding-inline: 14px; }
+      .header { align-items: flex-start; flex-direction: column; }
+      .brand-copy { display: none; }
+      .brand-logo { max-width: min(70vw, 240px); }
+      .hero-card { min-height: auto; padding: 24px 18px; }
+      .panel, .player-card, .controls-card { padding: 22px; }
+      .stat-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="header">
+      <div class="brand">
+        <div class="brand-logo-wrap">
+          <img class="brand-logo" src="data:image/png;base64,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" alt="Blacksmith AI" />
+        </div>
+        <div class="brand-copy">
+          <span class="brand-title">By Iron Cross Records</span>
+        </div>
+      </div>
+      <div class="stepper" aria-label="Mastering steps">
+        <div class="step active" data-step="1">1. Upload</div>
+        <div class="step" data-step="2">2. Analyze &amp; Master</div>
+        <div class="step" data-step="3">3. Preview &amp; Download</div>
+      </div>
+    </header>
+
+    <main>
+      <section class="page active" id="pageUpload">
+        <div class="hero-card">
+          <div class="hero-inner">
+            <div class="eyebrow"><span class="eyebrow-dot"></span>Blacksmith AI Mastering Engine</div>
+            <h1>Forge Your Master<br /><span class="accent">Instantly</span></h1>
+            <p class="hero-copy">
+              Upload your mix and let the engine analyze, shape, and prepare a polished master.
+              Drag and drop your file below or browse from your computer.
+            </p>
+
+            <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Upload your track">
+              <button class="upload-button" type="button" id="uploadButton">Upload a Track</button>
+              <div class="drop-help">Drop your mix here or click to browse</div>
+              <div class="support-text">Supports WAV, MP3, and M4A</div>
+            </div>
+
+            <input
+              id="fileInput"
+              class="hidden-input"
+              type="file"
+              accept=".wav,.mp3,.m4a,audio/wav,audio/mpeg,audio/mp4"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section class="page" id="pageProcessing">
+        <div class="processing-wrap">
+          <div class="panel">
+            <div class="processing-kicker">AI mastering in progress</div>
+            <h2 class="processing-title">Analyzing your mix and building a new master.</h2>
+            <p class="processing-copy">
+              Your track is being scanned, balanced, and rendered using the current settings. Analysis time depends on file length, so longer songs can linger here for a bit.
+            </p>
+
+            <div class="track-meta">
+              <div class="meta-chip" id="processingFileName">No file selected</div>
+              <div class="meta-chip" id="processingFileSize">0 MB</div>
+            </div>
+
+            <div class="progress-cluster">
+              <div class="progress-head">
+                <div class="progress-stage" id="progressStageText">Waiting to begin</div>
+                <div class="progress-value"><span id="progressPercent">0</span>%</div>
+              </div>
+              <div class="progress-bar" aria-label="Mastering progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <div class="progress-fill" id="progressFill"></div>
+              </div>
+
+              <ul class="stage-list" id="stageList">
+                <li class="stage-item" data-stage="upload"><span class="stage-dot"></span><span>Uploading mix</span></li>
+                <li class="stage-item" data-stage="analyze"><span class="stage-dot"></span><span>Analyzing loudness and tonal balance</span></li>
+                <li class="stage-item" data-stage="process"><span class="stage-dot"></span><span>Applying EQ, compression, and tonal shaping</span></li>
+                <li class="stage-item" data-stage="render"><span class="stage-dot"></span><span>Rendering master and preview files</span></li>
+                <li class="stage-item" data-stage="ready"><span class="stage-dot"></span><span>Preparing playback and download</span></li>
+              </ul>
+            </div>
+
+            <div class="error-banner" id="errorBanner"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" id="pageResults">
+        <div class="results-grid">
+          <section class="player-card">
+            <div class="player-eyebrow">Preview and compare</div>
+            <h2 class="results-title">Hear the difference.</h2>
+            <p class="results-copy">
+              Toggle between the original track and the new mastered version. If you want more shaping, adjust the controls and remaster from the original file.
+            </p>
+
+            <div class="track-meta">
+              <div class="meta-chip" id="resultFileName">No file selected</div>
+              <div class="meta-chip" id="resultSourceLabel">Preview ready</div>
+            </div>
+
+            <div class="toggle-row">
+              <button class="toggle-button active" type="button" id="playOriginalButton">Original</button>
+              <button class="toggle-button" type="button" id="playMasteredButton">Mastered</button>
+            </div>
+
+            <div class="audio-wrap">
+              <div class="now-playing">
+                <span>Now playing: <strong id="nowPlaying">Original</strong></span>
+                <span id="playerHint">Compare your source against the latest mastered preview.</span>
+              </div>
+              <audio controls id="audioPlayer" preload="metadata"></audio>
+            </div>
+
+            <div class="stat-grid">
+              <div class="stat-card">
+                <div class="stat-label">Input LUFS</div>
+                <div class="stat-value" id="statInputLufs">--</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Input True Peak</div>
+                <div class="stat-value" id="statInputPeak">--</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Input LRA</div>
+                <div class="stat-value" id="statInputLra">--</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Target LUFS</div>
+                <div class="stat-value" id="statTargetLufs">--</div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="controls-card">
+            <div class="controls-eyebrow">Mastering options</div>
+            <p class="section-copy">
+              Fine tune the current sound, then create another pass from the original file. These controls are shown in standard mastering concepts and remain visible at all times.
+            </p>
+
+            <div class="sliders">
+              <div class="slider-row">
+                <div class="slider-head">
+                  <div class="slider-label">Low EQ</div>
+                  <div class="slider-value" id="lowEqValue">0.0 dB</div>
+                </div>
+                <div class="slider-help">Low shelf adjustment for weight and low-end balance.</div>
+                <input type="range" id="lowEq" min="-6" max="6" step="0.1" value="0" />
+              </div>
+
+              <div class="slider-row">
+                <div class="slider-head">
+                  <div class="slider-label">Mid EQ</div>
+                  <div class="slider-value" id="midEqValue">0.0 dB</div>
+                </div>
+                <div class="slider-help">Broad midrange contour for presence and body.</div>
+                <input type="range" id="midEq" min="-6" max="6" step="0.1" value="0" />
+              </div>
+
+              <div class="slider-row">
+                <div class="slider-head">
+                  <div class="slider-label">High EQ</div>
+                  <div class="slider-value" id="highEqValue">0.0 dB</div>
+                </div>
+                <div class="slider-help">Top-end shelf for air, sheen, and edge control.</div>
+                <input type="range" id="highEq" min="-6" max="6" step="0.1" value="0" />
+              </div>
+
+              <div class="slider-row">
+                <div class="slider-head">
+                  <div class="slider-label">Compression</div>
+                  <div class="slider-value" id="compressionValue">2.0:1</div>
+                </div>
+                <div class="slider-help">Overall density target. Higher values feel firmer and more controlled.</div>
+                <input type="range" id="compression" min="1" max="4" step="0.1" value="2" />
+              </div>
+
+              <div class="slider-row">
+                <div class="slider-head">
+                  <div class="slider-label">Warmth</div>
+                  <div class="slider-value" id="warmthValue">35%</div>
+                </div>
+                <div class="slider-help">Low-mid color and bass weight.</div>
+                <input type="range" id="warmth" min="0" max="100" step="1" value="35" />
+              </div>
+
+              <div class="slider-row">
+                <div class="slider-head">
+                  <div class="slider-label">Brightness</div>
+                  <div class="slider-value" id="brightnessValue">35%</div>
+                </div>
+                <div class="slider-help">High-end openness and shine.</div>
+                <input type="range" id="brightness" min="0" max="100" step="1" value="35" />
+              </div>
+
+              <div class="slider-row">
+                <div class="slider-head">
+                  <div class="slider-label">Punch</div>
+                  <div class="slider-value" id="punchValue">45%</div>
+                </div>
+                <div class="slider-help">Controls how assertive the dynamics feel.</div>
+                <input type="range" id="punch" min="0" max="100" step="1" value="45" />
+              </div>
+
+              <div class="slider-row">
+                <div class="slider-head">
+                  <div class="slider-label">Target LUFS</div>
+                  <div class="slider-value" id="targetLufsValue">-14.0 LUFS</div>
+                </div>
+                <div class="slider-help">Integrated loudness target for the next master pass.</div>
+                <input type="range" id="targetLufs" min="-16" max="-7" step="0.1" value="-14" />
+              </div>
+            </div>
+
+            <div class="action-row">
+              <button class="primary-button" type="button" id="remasterButton">Remaster</button>
+              <button class="ghost-button" type="button" id="newMasterButton">New Master</button>
+              <a class="ghost-button download-link" id="downloadButton" href="#" download="mastered.wav">Download</a>
+            </div>
+
+            <div class="footer-note">
+              Download returns the latest high quality WAV created by the server. Remaster always starts from the original uploaded file, not the previous master.
+            </div>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const allowedExtensions = ["wav", "mp3", "m4a"];
+    const state = {
+      originalFile: null,
+      originalUrl: null,
+      masteredPreviewUrl: null,
+      masteredDownloadUrl: null,
+      currentSource: "original",
+      xhr: null,
+      progressTimer: null,
+      simulatedProgress: 0,
+      activeStage: "upload",
+      isBusy: false,
+    };
+
+    const pages = {
+      upload: document.getElementById("pageUpload"),
+      processing: document.getElementById("pageProcessing"),
+      results: document.getElementById("pageResults"),
+    };
+
+    const stepEls = Array.from(document.querySelectorAll(".step"));
+    const dropzone = document.getElementById("dropzone");
+    const uploadButton = document.getElementById("uploadButton");
+    const fileInput = document.getElementById("fileInput");
+    const errorBanner = document.getElementById("errorBanner");
+
+    const processingFileName = document.getElementById("processingFileName");
+    const processingFileSize = document.getElementById("processingFileSize");
+    const progressPercent = document.getElementById("progressPercent");
+    const progressFill = document.getElementById("progressFill");
+    const progressStageText = document.getElementById("progressStageText");
+    const stageItems = Array.from(document.querySelectorAll(".stage-item"));
+
+    const resultFileName = document.getElementById("resultFileName");
+    const resultSourceLabel = document.getElementById("resultSourceLabel");
+    const playOriginalButton = document.getElementById("playOriginalButton");
+    const playMasteredButton = document.getElementById("playMasteredButton");
+    const audioPlayer = document.getElementById("audioPlayer");
+    const nowPlaying = document.getElementById("nowPlaying");
+    const downloadButton = document.getElementById("downloadButton");
+    const remasterButton = document.getElementById("remasterButton");
+    const newMasterButton = document.getElementById("newMasterButton");
+
+    const statInputLufs = document.getElementById("statInputLufs");
+    const statInputPeak = document.getElementById("statInputPeak");
+    const statInputLra = document.getElementById("statInputLra");
+    const statTargetLufs = document.getElementById("statTargetLufs");
+
+    const sliderConfig = [
+      { id: "lowEq", output: "lowEqValue", formatter: (v) => `${Number(v).toFixed(1)} dB` },
+      { id: "midEq", output: "midEqValue", formatter: (v) => `${Number(v).toFixed(1)} dB` },
+      { id: "highEq", output: "highEqValue", formatter: (v) => `${Number(v).toFixed(1)} dB` },
+      { id: "compression", output: "compressionValue", formatter: (v) => `${Number(v).toFixed(1)}:1` },
+      { id: "warmth", output: "warmthValue", formatter: (v) => `${v}%` },
+      { id: "brightness", output: "brightnessValue", formatter: (v) => `${v}%` },
+      { id: "punch", output: "punchValue", formatter: (v) => `${v}%` },
+      { id: "targetLufs", output: "targetLufsValue", formatter: (v) => `${Number(v).toFixed(1)} LUFS` },
+    ];
+
+    function setPage(step) {
+      pages.upload.classList.toggle("active", step === 1);
+      pages.processing.classList.toggle("active", step === 2);
+      pages.results.classList.toggle("active", step === 3);
+      stepEls.forEach((el) => {
+        el.classList.toggle("active", Number(el.dataset.step) === step);
+      });
+    }
+
+    function formatFileSize(bytes) {
+      if (!bytes || Number.isNaN(bytes)) return "0 MB";
+      const units = ["B", "KB", "MB", "GB"];
+      let value = bytes;
+      let index = 0;
+      while (value >= 1024 && index < units.length - 1) {
+        value /= 1024;
+        index += 1;
+      }
+      return `${value.toFixed(index === 0 ? 0 : 2)} ${units[index]}`;
+    }
+
+    function isAcceptedFile(file) {
+      if (!file || !file.name) return false;
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      return allowedExtensions.includes(ext);
+    }
+
+    function showError(message) {
+      errorBanner.textContent = message;
+      errorBanner.style.display = "block";
+    }
+
+    function clearError() {
+      errorBanner.textContent = "";
+      errorBanner.style.display = "none";
+    }
+
+    function updateProgress(percent, stageKey, stageLabel) {
+      const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+      progressPercent.textContent = String(clamped);
+      progressFill.style.width = `${clamped}%`;
+      const progressBar = document.querySelector('.progress-bar');
+      if (progressBar) progressBar.setAttribute('aria-valuenow', String(clamped));
+      if (stageLabel) progressStageText.textContent = stageLabel;
+      if (stageKey) {
+        state.activeStage = stageKey;
+        const order = ["upload", "analyze", "process", "render", "ready"];
+        const activeIndex = order.indexOf(stageKey);
+        stageItems.forEach((item) => {
+          const idx = order.indexOf(item.dataset.stage);
+          item.classList.toggle("done", idx >= 0 && idx < activeIndex);
+          item.classList.toggle("active", item.dataset.stage === stageKey);
+        });
+      }
+    }
+
+    function startProcessingSimulation(startAt = 28) {
+      stopProcessingSimulation();
+      state.simulatedProgress = Math.max(startAt, state.simulatedProgress, 28);
+      const steps = [
+        { max: 46, stage: "analyze", label: "Upload complete. Scanning loudness and tonal balance" },
+        { max: 78, stage: "process", label: "Applying EQ, compression, and tonal shaping" },
+        { max: 94, stage: "render", label: "Rendering master and preview" },
+        { max: 98, stage: "ready", label: "Finalizing playback and download" },
+      ];
+
+      state.progressTimer = window.setInterval(() => {
+        let current = steps[steps.length - 1];
+        for (const step of steps) {
+          if (state.simulatedProgress < step.max) {
+            current = step;
+            break;
+          }
+        }
+        if (state.simulatedProgress < current.max) {
+          const bump = current.stage === "analyze"
+            ? (Math.random() * 1.8 + 1.25)
+            : current.stage === "process"
+              ? (Math.random() * 1.45 + 0.9)
+              : (Math.random() * 0.7 + 0.28);
+          state.simulatedProgress += bump;
+          if (state.simulatedProgress > current.max) state.simulatedProgress = current.max;
+        }
+        updateProgress(state.simulatedProgress, current.stage, current.label);
+      }, 165);
+    }
+
+    function stopProcessingSimulation() {
+      if (state.progressTimer) {
+        window.clearInterval(state.progressTimer);
+        state.progressTimer = null;
+      }
+    }
+
+    function resetResults() {
+      state.masteredPreviewUrl = null;
+      state.masteredDownloadUrl = null;
+      playMasteredButton.disabled = true;
+      downloadButton.removeAttribute("href");
+      downloadButton.style.pointerEvents = "none";
+      downloadButton.style.opacity = "0.55";
+    }
+
+    function prepareFile(file) {
+      if (!isAcceptedFile(file)) {
+        window.alert("Please choose a WAV, MP3, or M4A file.");
+        return;
+      }
+      if (state.originalUrl) URL.revokeObjectURL(state.originalUrl);
+      state.originalFile = file;
+      state.originalUrl = URL.createObjectURL(file);
+      resetResults();
+      processingFileName.textContent = file.name;
+      processingFileSize.textContent = formatFileSize(file.size);
+      resultFileName.textContent = file.name;
+      resultSourceLabel.textContent = "Original and mastered preview ready";
+      playOriginal();
+      setPage(2);
+      startMastering();
+    }
+
+    function getMasteringSettings() {
+      return {
+        target_lufs: document.getElementById("targetLufs").value,
+        warmth: document.getElementById("warmth").value,
+        brightness: document.getElementById("brightness").value,
+        punch: document.getElementById("punch").value,
+      };
+    }
+
+    function startMastering() {
+      if (!state.originalFile || state.isBusy) return;
+      clearError();
+      state.isBusy = true;
+      remasterButton.disabled = true;
+      newMasterButton.disabled = true;
+      uploadButton.disabled = true;
+      playMasteredButton.disabled = true;
+      setPage(2);
+      updateProgress(0, "upload", "Uploading mix to server");
+      startProcessingSimulation();
+
+      const formData = new FormData();
+      formData.append("file", state.originalFile, state.originalFile.name);
+      const settings = getMasteringSettings();
+      Object.entries(settings).forEach(([key, value]) => formData.append(key, String(value)));
+
+      const xhr = new XMLHttpRequest();
+      state.xhr = xhr;
+      const apiBase = window.location.protocol === "file:" ? "http://127.0.0.1:8000" : window.location.origin;
+      xhr.open("POST", `${apiBase}/api/master`, true);
+      xhr.responseType = "json";
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const uploadPercent = Math.max(8, Math.round((event.loaded / event.total) * 30));
+          state.simulatedProgress = Math.max(state.simulatedProgress, uploadPercent);
+          updateProgress(state.simulatedProgress, "upload", "Uploading mix to server");
+          if (event.loaded >= event.total) {
+            state.simulatedProgress = Math.max(state.simulatedProgress, 28);
+            updateProgress(state.simulatedProgress, "analyze", "Upload complete. Scanning loudness and tonal balance");
+          }
+        }
+      };
+
+      xhr.upload.onload = () => {
+        state.simulatedProgress = Math.max(state.simulatedProgress, 28);
+        updateProgress(state.simulatedProgress, "analyze", "Upload complete. Scanning loudness and tonal balance");
+      };
+
+      xhr.onerror = () => {
+        stopProcessingSimulation();
+        updateProgress(0, "upload", "Upload failed");
+        showError("Mastering failed. The request could not reach the server. If you are opening the HTML directly, make sure your local app is running at http://127.0.0.1:8000.");
+        state.isBusy = false;
+        remasterButton.disabled = false;
+        newMasterButton.disabled = false;
+        uploadButton.disabled = false;
+      };
+
+      xhr.onload = () => {
+        stopProcessingSimulation();
+        state.isBusy = false;
+        remasterButton.disabled = false;
+        newMasterButton.disabled = false;
+        uploadButton.disabled = false;
+
+        const ok = xhr.status >= 200 && xhr.status < 300;
+        const payload = xhr.response || {};
+
+        if (!ok) {
+          const detail = payload?.detail || xhr.responseText || "Unknown server error.";
+          updateProgress(0, "upload", "Mastering failed");
+          showError(typeof detail === "string" ? detail : "Mastering failed.");
+          return;
+        }
+
+        updateProgress(100, "ready", "Master complete");
+                const apiBaseForFiles = window.location.protocol === "file:" ? "http://127.0.0.1:8000" : window.location.origin;
+        state.masteredPreviewUrl = payload.preview_url ? new URL(payload.preview_url, apiBaseForFiles).toString() : null;
+        state.masteredDownloadUrl = payload.download_url ? new URL(payload.download_url, apiBaseForFiles).toString() : null;
+        downloadButton.href = state.masteredDownloadUrl || "#";
+        downloadButton.style.pointerEvents = "auto";
+        downloadButton.style.opacity = "1";
+        playMasteredButton.disabled = false;
+
+        const stats = payload.stats || {};
+        statInputLufs.textContent = typeof stats.input_lufs === "number" ? `${stats.input_lufs.toFixed(1)} LUFS` : "--";
+        statInputPeak.textContent = typeof stats.input_true_peak === "number" ? `${stats.input_true_peak.toFixed(1)} dBTP` : "--";
+        statInputLra.textContent = typeof stats.input_lra === "number" ? `${stats.input_lra.toFixed(1)} LU` : "--";
+        statTargetLufs.textContent = typeof stats.target_lufs === "number" ? `${stats.target_lufs.toFixed(1)} LUFS` : `${Number(document.getElementById("targetLufs").value).toFixed(1)} LUFS`;
+
+        setPage(3);
+        playMastered();
+      };
+
+      xhr.send(formData);
+    }
+
+    function playOriginal() {
+      if (!state.originalUrl) return;
+      state.currentSource = "original";
+      playOriginalButton.classList.add("active");
+      playMasteredButton.classList.remove("active");
+      nowPlaying.textContent = "Original";
+      audioPlayer.src = state.originalUrl;
+      audioPlayer.load();
+    }
+
+    function playMastered() {
+      if (!state.masteredPreviewUrl) return;
+      state.currentSource = "mastered";
+      playOriginalButton.classList.remove("active");
+      playMasteredButton.classList.add("active");
+      nowPlaying.textContent = "Mastered";
+      audioPlayer.src = state.masteredPreviewUrl;
+      audioPlayer.load();
+    }
+
+    function resetToUpload() {
+      stopProcessingSimulation();
+      if (state.xhr && state.isBusy) state.xhr.abort();
+      state.isBusy = false;
+      clearError();
+      updateProgress(0, "upload", "Waiting to begin");
+      resetResults();
+      if (state.originalUrl) {
+        URL.revokeObjectURL(state.originalUrl);
+      }
+      state.originalUrl = null;
+      state.originalFile = null;
+      fileInput.value = "";
+      playOriginalButton.classList.add("active");
+      playMasteredButton.classList.remove("active");
+      audioPlayer.removeAttribute("src");
+      audioPlayer.load();
+      statInputLufs.textContent = "--";
+      statInputPeak.textContent = "--";
+      statInputLra.textContent = "--";
+      statTargetLufs.textContent = "--";
+      setPage(1);
+    }
+
+    function bindSliderValue(config) {
+      const input = document.getElementById(config.id);
+      const output = document.getElementById(config.output);
+      const render = () => {
+        output.textContent = config.formatter(input.value);
+      };
+      input.addEventListener("input", render);
+      render();
+    }
+
+    sliderConfig.forEach(bindSliderValue);
+
+    uploadButton.addEventListener("click", () => fileInput.click());
+    dropzone.addEventListener("click", (event) => {
+      if (event.target === uploadButton) return;
+      fileInput.click();
+    });
+    dropzone.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        fileInput.click();
+      }
+    });
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files?.[0];
+      if (file) prepareFile(file);
+    });
+
+    ["dragenter", "dragover"].forEach((eventName) => {
+      dropzone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        dropzone.classList.add("dragover");
+      });
+    });
+
+    ["dragleave", "drop"].forEach((eventName) => {
+      dropzone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        dropzone.classList.remove("dragover");
+      });
+    });
+
+    dropzone.addEventListener("drop", (event) => {
+      const file = event.dataTransfer?.files?.[0];
+      if (file) prepareFile(file);
+    });
+
+    playOriginalButton.addEventListener("click", playOriginal);
+    playMasteredButton.addEventListener("click", playMastered);
+    remasterButton.addEventListener("click", () => {
+      if (!state.originalFile) return;
+      startMastering();
+    });
+    newMasterButton.addEventListener("click", resetToUpload);
+
+    resetResults();
+    updateProgress(0, "upload", "Waiting to begin");
+  </script>
+</body>
+</html>
