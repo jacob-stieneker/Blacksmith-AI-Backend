@@ -968,6 +968,7 @@
 
   <script>
     const allowedExtensions = ["wav", "mp3", "m4a"];
+    const API_BASE = "https://your-backend-domain.com";
     const state = {
       originalFile: null,
       originalUrl: null,
@@ -1179,8 +1180,7 @@
 
       const xhr = new XMLHttpRequest();
       state.xhr = xhr;
-      const apiBase = window.location.protocol === "file:" ? "http://127.0.0.1:8000" : window.location.origin;
-      xhr.open("POST", `${apiBase}/api/master`, true);
+      xhr.open("POST", `${API_BASE}/api/master`, true);
       xhr.responseType = "json";
 
       xhr.upload.onprogress = (event) => {
@@ -1203,7 +1203,7 @@
       xhr.onerror = () => {
         stopProcessingSimulation();
         updateProgress(0, "upload", "Upload failed");
-        showError("Mastering failed. The request could not reach the server. If you are opening the HTML directly, make sure your local app is running at http://127.0.0.1:8000.");
+        showError(`Mastering failed. The request could not reach the server at ${API_BASE}. Check that the backend is deployed, running, and allowed by CORS.`);
         state.isBusy = false;
         remasterButton.disabled = false;
         newMasterButton.disabled = false;
@@ -1228,9 +1228,8 @@
         }
 
         updateProgress(100, "ready", "Master complete");
-                const apiBaseForFiles = window.location.protocol === "file:" ? "http://127.0.0.1:8000" : window.location.origin;
-        state.masteredPreviewUrl = payload.preview_url ? new URL(payload.preview_url, apiBaseForFiles).toString() : null;
-        state.masteredDownloadUrl = payload.download_url ? new URL(payload.download_url, apiBaseForFiles).toString() : null;
+        state.masteredPreviewUrl = payload.preview_url ? new URL(payload.preview_url, API_BASE).toString() : null;
+        state.masteredDownloadUrl = payload.download_url ? new URL(payload.download_url, API_BASE).toString() : null;
         downloadButton.href = state.masteredDownloadUrl || "#";
         downloadButton.style.pointerEvents = "auto";
         downloadButton.style.opacity = "1";
